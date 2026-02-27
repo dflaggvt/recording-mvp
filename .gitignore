@@ -1,0 +1,20 @@
+*.iml
+.gradle
+/local.properties
+/.idea
+.DS_Store
+/build
+/captures
+.externalNativeBuild
+.cxx
+/app/build
+/app/.cxx
+*.apk
+*.ap_
+*.dex
+*.class
+*.hprof
+
+# ML models (too large for git)
+*.bin
+*.onnx
