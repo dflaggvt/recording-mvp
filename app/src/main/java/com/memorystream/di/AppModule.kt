@@ -1,11 +1,14 @@
 package com.memorystream.di
 
 import android.content.Context
+import com.memorystream.api.ApiConfig
 import com.memorystream.data.db.AppDatabase
 import com.memorystream.data.db.MemoryChunkDao
+import com.memorystream.data.db.UtteranceDao
 import com.memorystream.data.repository.MemoryRepository
-import com.memorystream.embedding.OnnxEmbeddingEngine
+import com.memorystream.embedding.OpenAIEmbeddingEngine
 import com.memorystream.embedding.SemanticSearchEngine
+import com.memorystream.intelligence.CommitmentDetector
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -31,20 +34,36 @@ object AppModule {
 
     @Provides
     @Singleton
-    fun provideMemoryRepository(dao: MemoryChunkDao): MemoryRepository {
-        return MemoryRepository(dao)
+    fun provideUtteranceDao(database: AppDatabase): UtteranceDao {
+        return database.utteranceDao()
     }
 
     @Provides
     @Singleton
-    fun provideEmbeddingEngine(@ApplicationContext context: Context): OnnxEmbeddingEngine {
-        return OnnxEmbeddingEngine(context)
+    fun provideMemoryRepository(chunkDao: MemoryChunkDao, utteranceDao: UtteranceDao): MemoryRepository {
+        return MemoryRepository(chunkDao, utteranceDao)
+    }
+
+    @Provides
+    @Singleton
+    fun provideEmbeddingEngine(): OpenAIEmbeddingEngine {
+        return OpenAIEmbeddingEngine().also {
+            it.initialize(ApiConfig.openaiApiKey)
+        }
+    }
+
+    @Provides
+    @Singleton
+    fun provideCommitmentDetector(): CommitmentDetector {
+        return CommitmentDetector().also {
+            it.initialize(ApiConfig.openaiApiKey)
+        }
     }
 
     @Provides
     @Singleton
     fun provideSemanticSearchEngine(
-        embeddingEngine: OnnxEmbeddingEngine,
+        embeddingEngine: OpenAIEmbeddingEngine,
         repository: MemoryRepository
     ): SemanticSearchEngine {
         return SemanticSearchEngine(embeddingEngine, repository)

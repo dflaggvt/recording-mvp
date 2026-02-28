@@ -14,11 +14,13 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.FiberManualRecord
 import androidx.compose.material.icons.filled.Mic
-import androidx.compose.material.icons.filled.MicOff
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.Usb
 import androidx.compose.material.icons.filled.UsbOff
@@ -64,7 +66,6 @@ fun HomeScreen(viewModel: HomeViewModel = hiltViewModel()) {
 
         Spacer(modifier = Modifier.height(8.dp))
 
-        // USB mic status
         Row(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.Center
@@ -85,9 +86,8 @@ fun HomeScreen(viewModel: HomeViewModel = hiltViewModel()) {
             )
         }
 
-        Spacer(modifier = Modifier.height(24.dp))
+        Spacer(modifier = Modifier.height(16.dp))
 
-        // Record button
         val buttonColor by animateColorAsState(
             targetValue = if (uiState.isRecording) MaterialTheme.colorScheme.error
                           else MaterialTheme.colorScheme.primary,
@@ -96,7 +96,7 @@ fun HomeScreen(viewModel: HomeViewModel = hiltViewModel()) {
 
         Button(
             onClick = { viewModel.toggleRecording() },
-            modifier = Modifier.size(120.dp),
+            modifier = Modifier.size(100.dp),
             shape = CircleShape,
             colors = ButtonDefaults.buttonColors(containerColor = buttonColor),
             contentPadding = PaddingValues(0.dp)
@@ -106,11 +106,11 @@ fun HomeScreen(viewModel: HomeViewModel = hiltViewModel()) {
                               else Icons.Default.Mic,
                 contentDescription = if (uiState.isRecording) "Stop recording"
                                      else "Start recording",
-                modifier = Modifier.size(48.dp)
+                modifier = Modifier.size(40.dp)
             )
         }
 
-        Spacer(modifier = Modifier.height(8.dp))
+        Spacer(modifier = Modifier.height(4.dp))
 
         Text(
             text = if (uiState.isRecording) "Recording..." else "Tap to start",
@@ -118,9 +118,33 @@ fun HomeScreen(viewModel: HomeViewModel = hiltViewModel()) {
             fontWeight = FontWeight.Medium
         )
 
-        Spacer(modifier = Modifier.height(16.dp))
+        // Live transcript area
+        if (uiState.isRecording && uiState.liveTranscript.isNotBlank()) {
+            Spacer(modifier = Modifier.height(12.dp))
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(12.dp),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.primaryContainer
+                )
+            ) {
+                Column(
+                    modifier = Modifier
+                        .padding(12.dp)
+                        .height(100.dp)
+                        .verticalScroll(rememberScrollState())
+                ) {
+                    Text(
+                        text = uiState.liveTranscript,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer
+                    )
+                }
+            }
+        }
 
-        // Stats row
+        Spacer(modifier = Modifier.height(12.dp))
+
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceEvenly
@@ -129,9 +153,8 @@ fun HomeScreen(viewModel: HomeViewModel = hiltViewModel()) {
             StatCard("Total Time", formatDuration(uiState.totalDurationMs))
         }
 
-        Spacer(modifier = Modifier.height(16.dp))
+        Spacer(modifier = Modifier.height(12.dp))
 
-        // Recent chunks
         Text(
             text = "Recent Chunks",
             style = MaterialTheme.typography.titleMedium,
@@ -209,6 +232,14 @@ private fun ChunkListItem(chunk: MemoryChunkEntity) {
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 2
+                    )
+                }
+                if (!chunk.commitments.isNullOrBlank()) {
+                    Text(
+                        text = "Has commitments",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.tertiary,
+                        fontWeight = FontWeight.Bold
                     )
                 }
             }

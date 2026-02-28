@@ -12,12 +12,16 @@ import android.util.Log
 import androidx.core.app.NotificationCompat
 import com.memorystream.MemoryStreamApp
 import com.memorystream.R
+import com.memorystream.api.ApiConfig
 import com.memorystream.audio.AudioCaptureManager
 import com.memorystream.audio.AudioChunkScheduler
+import com.memorystream.data.db.UtteranceEntity
 import com.memorystream.data.model.ChunkResult
 import com.memorystream.data.model.ChunkStatus
 import com.memorystream.data.repository.MemoryRepository
-import com.memorystream.embedding.OnnxEmbeddingEngine
+import com.memorystream.embedding.OpenAIEmbeddingEngine
+import com.memorystream.intelligence.CommitmentDetector
+import com.memorystream.transcription.DeepgramClient
 import com.memorystream.transcription.TranscriptionWorker
 import com.memorystream.ui.MainActivity
 import dagger.hilt.android.AndroidEntryPoint
@@ -26,6 +30,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 import javax.inject.Inject
@@ -38,6 +43,9 @@ class RecordingService : Service() {
         const val ACTION_START = "com.memorystream.action.START"
         const val ACTION_STOP = "com.memorystream.action.STOP"
         private const val NOTIFICATION_ID = 1
+
+        var liveTranscript: StateFlow<String>? = null
+            private set
 
         fun startRecording(context: Context) {
             val intent = Intent(context, RecordingService::class.java).apply {
@@ -55,12 +63,14 @@ class RecordingService : Service() {
     }
 
     @Inject lateinit var repository: MemoryRepository
-    @Inject lateinit var embeddingEngine: OnnxEmbeddingEngine
+    @Inject lateinit var embeddingEngine: OpenAIEmbeddingEngine
+    @Inject lateinit var commitmentDetector: CommitmentDetector
 
     private val recordingScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val processingScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private var audioCaptureManager: AudioCaptureManager? = null
     private var chunkScheduler: AudioChunkScheduler? = null
+    private var deepgramClient: DeepgramClient? = null
     private var wakeLock: PowerManager.WakeLock? = null
     private var transcriptionWorker: TranscriptionWorker? = null
     private var processingJob: Job? = null
@@ -91,15 +101,32 @@ class RecordingService : Service() {
         }
 
         audioCaptureManager = capture
+
+        // Start Deepgram streaming
+        val dgClient = DeepgramClient(ApiConfig.deepgramApiKey)
+        deepgramClient = dgClient
+        dgClient.connect()
+        liveTranscript = dgClient.liveTranscript
+
+        // Embed each final utterance in real-time (~2s from speech to searchable)
+        dgClient.onFinalUtterance = { text, timestamp ->
+            processingScope.launch {
+                embedUtterance(text, timestamp)
+            }
+        }
+
+        // Hook audio into both chunk recorder AND Deepgram
+        capture.onAudioBuffer = { buffer, count ->
+            dgClient.sendAudio(buffer, count)
+        }
         capture.start()
 
         val outputDir = getExternalFilesDir("audio_chunks")!!
         val scheduler = AudioChunkScheduler(capture, repository, outputDir)
         chunkScheduler = scheduler
 
-        transcriptionWorker = TranscriptionWorker(this, repository, embeddingEngine)
+        transcriptionWorker = TranscriptionWorker(repository, embeddingEngine, commitmentDetector)
 
-        // Launch processing coroutine in its own scope so it survives recording stop
         processingJob = processingScope.launch {
             for (chunkResult in scheduler.processingChannel) {
                 processChunk(chunkResult)
@@ -109,14 +136,46 @@ class RecordingService : Service() {
         scheduler.start(recordingScope)
     }
 
+    private suspend fun embedUtterance(text: String, timestamp: Long) {
+        if (text.isBlank()) return
+        val id = java.util.UUID.randomUUID().toString()
+        try {
+            val utterance = UtteranceEntity(
+                id = id,
+                timestamp = timestamp,
+                text = text
+            )
+            repository.insertUtterance(utterance)
+
+            val embedding = embeddingEngine.embed(text)
+            repository.updateUtterance(utterance.copy(
+                embeddingVector = embedding,
+                isEmbedded = true
+            ))
+            Log.d(TAG, "Utterance embedded: ${text.take(50)}...")
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to embed utterance: ${text.take(50)}", e)
+        }
+    }
+
     private suspend fun processChunk(chunkResult: ChunkResult) {
         try {
-            Log.i(TAG, "Processing chunk: ${chunkResult.filePath}")
-            transcriptionWorker?.processChunk(chunkResult)
+            // Get the transcript that Deepgram accumulated during this chunk
+            val transcript = deepgramClient?.getAndClearFinalTranscript() ?: ""
+            Log.i(TAG, "Processing chunk with Deepgram transcript (${transcript.length} chars)")
+
+            // Find the chunk entity by file path
+            val chunks = repository.getChunksByStatus(ChunkStatus.PENDING_TRANSCRIPTION)
+            val chunk = chunks.firstOrNull { it.audioFilePath == chunkResult.filePath }
+
+            if (chunk != null) {
+                transcriptionWorker?.processChunk(chunk.id, transcript)
+            } else {
+                Log.w(TAG, "No pending chunk found for ${chunkResult.filePath}")
+            }
         } catch (e: Exception) {
             Log.e(TAG, "Failed to process chunk: ${chunkResult.filePath}", e)
-            // Mark chunk as error but don't crash the pipeline
-            val chunks = repository.getChunksByStatus(ChunkStatus.TRANSCRIBING)
+            val chunks = repository.getChunksByStatus(ChunkStatus.PENDING_TRANSCRIPTION)
             chunks.forEach { chunk ->
                 if (chunk.audioFilePath == chunkResult.filePath) {
                     repository.update(chunk.copy(status = ChunkStatus.ERROR))
@@ -131,13 +190,13 @@ class RecordingService : Service() {
         audioCaptureManager?.release()
         recordingScope.cancel()
 
-        // Close the channel so the processing loop can drain and finish
         chunkScheduler?.processingChannel?.close()
 
-        // Wait for in-flight processing to complete, then shut down
         processingScope.launch {
             Log.i(TAG, "Waiting for in-flight processing to complete...")
             processingJob?.join()
+            deepgramClient?.disconnect()
+            liveTranscript = null
             Log.i(TAG, "Processing complete, shutting down service")
             releaseWakeLock()
             stopForeground(STOP_FOREGROUND_REMOVE)
@@ -186,9 +245,10 @@ class RecordingService : Service() {
         super.onDestroy()
         chunkScheduler?.stop()
         audioCaptureManager?.release()
+        deepgramClient?.disconnect()
+        liveTranscript = null
         releaseWakeLock()
         recordingScope.cancel()
-        // Give processing scope a generous timeout to finish current work
         processingScope.launch {
             withTimeoutOrNull(600_000) { processingJob?.join() }
             processingScope.cancel()

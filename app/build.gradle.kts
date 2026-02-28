@@ -1,8 +1,15 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("com.google.dagger.hilt.android")
     id("com.google.devtools.ksp")
+}
+
+val localProperties = Properties().apply {
+    val file = rootProject.file("local.properties")
+    if (file.exists()) load(file.inputStream())
 }
 
 android {
@@ -13,16 +20,16 @@ android {
         applicationId = "com.memorystream"
         minSdk = 26
         targetSdk = 34
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = 2
+        versionName = "0.2.0"
 
-        ndk {
-            abiFilters += "arm64-v8a"
-        }
+        buildConfigField("String", "DEEPGRAM_API_KEY", "\"${localProperties["deepgram.api.key"]}\"")
+        buildConfigField("String", "OPENAI_API_KEY", "\"${localProperties["openai.api.key"]}\"")
     }
 
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 
     composeOptions {
@@ -46,13 +53,6 @@ android {
 
     kotlinOptions {
         jvmTarget = "17"
-    }
-
-    externalNativeBuild {
-        cmake {
-            path = file("src/main/cpp/CMakeLists.txt")
-            version = "3.22.1"
-        }
     }
 }
 
@@ -86,9 +86,9 @@ dependencies {
     // Coroutines
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
 
-    // ONNX Runtime
-    implementation("com.microsoft.onnxruntime:onnxruntime-android:1.17.0")
-    implementation("com.microsoft.onnxruntime:onnxruntime-extensions-android:0.10.0")
+    // Networking (Deepgram WebSocket + OpenAI HTTP)
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    implementation("com.google.code.gson:gson:2.10.1")
 
     // Media playback
     implementation("androidx.media:media:1.7.0")

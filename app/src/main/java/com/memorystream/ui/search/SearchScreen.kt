@@ -9,16 +9,18 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.FormatQuote
+import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -78,7 +80,10 @@ fun SearchScreen(viewModel: SearchViewModel = hiltViewModel()) {
 
         when {
             uiState.isSearching -> {
-                CircularProgressIndicator(
+                Text(
+                    text = "Searching...",
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = MaterialTheme.colorScheme.primary,
                     modifier = Modifier.align(Alignment.CenterHorizontally)
                 )
             }
@@ -110,7 +115,9 @@ fun SearchScreen(viewModel: SearchViewModel = hiltViewModel()) {
 @Composable
 private fun SearchResultItem(result: SearchResult) {
     var expanded by remember { mutableStateOf(false) }
-    val dateFormat = remember { SimpleDateFormat("MMM dd, HH:mm", Locale.getDefault()) }
+    val dateFormat = remember { SimpleDateFormat("MMM dd, HH:mm:ss", Locale.getDefault()) }
+
+    val isUtterance = result is SearchResult.UtteranceResult
 
     Card(
         modifier = Modifier
@@ -118,7 +125,8 @@ private fun SearchResultItem(result: SearchResult) {
             .padding(vertical = 4.dp)
             .clickable { expanded = !expanded },
         colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceVariant
+            containerColor = if (isUtterance) MaterialTheme.colorScheme.primaryContainer
+                             else MaterialTheme.colorScheme.surfaceVariant
         )
     ) {
         Column(modifier = Modifier.padding(12.dp)) {
@@ -126,14 +134,21 @@ private fun SearchResultItem(result: SearchResult) {
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = dateFormat.format(Date(result.chunk.startTimestamp)),
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.primary
-                    )
-                }
+                Icon(
+                    imageVector = if (isUtterance) Icons.Default.FormatQuote
+                                  else Icons.Default.Layers,
+                    contentDescription = if (isUtterance) "Utterance" else "Chunk",
+                    modifier = Modifier.size(16.dp),
+                    tint = if (isUtterance) MaterialTheme.colorScheme.primary
+                           else MaterialTheme.colorScheme.secondary
+                )
                 Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = dateFormat.format(Date(result.timestamp)),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.weight(1f)
+                )
                 Text(
                     text = "%.0f%%".format(result.score * 100),
                     style = MaterialTheme.typography.labelMedium,
@@ -142,18 +157,32 @@ private fun SearchResultItem(result: SearchResult) {
                 )
             }
 
-            if (!result.chunk.summary.isNullOrBlank()) {
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    text = result.chunk.summary.orEmpty(),
-                    style = MaterialTheme.typography.bodyMedium,
-                    maxLines = if (expanded) Int.MAX_VALUE else 2,
-                    overflow = TextOverflow.Ellipsis
-                )
+            Spacer(modifier = Modifier.height(4.dp))
+
+            Text(
+                text = result.text,
+                style = MaterialTheme.typography.bodyMedium,
+                maxLines = if (expanded) Int.MAX_VALUE else 3,
+                overflow = TextOverflow.Ellipsis
+            )
+
+            if (result is SearchResult.ChunkResult && !result.chunk.commitments.isNullOrBlank()) {
+                AnimatedVisibility(visible = expanded) {
+                    Column {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = "Commitments detected",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.tertiary
+                        )
+                    }
+                }
             }
 
-            AnimatedVisibility(visible = expanded) {
-                Column {
+            if (result is SearchResult.ChunkResult && expanded) {
+                val fullTranscript = result.chunk.transcript
+                if (!fullTranscript.isNullOrBlank() && fullTranscript != result.text) {
                     Spacer(modifier = Modifier.height(8.dp))
                     Text(
                         text = "Full Transcript",
@@ -163,7 +192,7 @@ private fun SearchResultItem(result: SearchResult) {
                     )
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
-                        text = result.chunk.transcript ?: "No transcript available",
+                        text = fullTranscript,
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )

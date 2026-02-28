@@ -37,7 +37,7 @@ class SearchViewModel @Inject constructor(
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isSearching = true)
             try {
-                val results = searchEngine.search(query, topK = 10)
+                val results = searchEngine.search(query, topK = 15)
                 _uiState.value = _uiState.value.copy(
                     results = results,
                     isSearching = false,

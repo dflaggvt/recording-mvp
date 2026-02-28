@@ -2,24 +2,20 @@ package com.memorystream.data.db
 
 import androidx.room.Entity
 import androidx.room.PrimaryKey
-import com.memorystream.data.model.ChunkStatus
 
-@Entity(tableName = "memory_chunks")
-data class MemoryChunkEntity(
+@Entity(tableName = "utterances")
+data class UtteranceEntity(
     @PrimaryKey val id: String,
-    val startTimestamp: Long,
-    val endTimestamp: Long,
-    val transcript: String? = null,
-    val summary: String? = null,
-    val commitments: String? = null,
+    val chunkId: String? = null,
+    val timestamp: Long,
+    val text: String,
     val embeddingVector: FloatArray? = null,
-    val audioFilePath: String,
-    val status: ChunkStatus = ChunkStatus.RECORDING
+    val isEmbedded: Boolean = false
 ) {
     override fun equals(other: Any?): Boolean {
         if (this === other) return true
         if (javaClass != other?.javaClass) return false
-        other as MemoryChunkEntity
+        other as UtteranceEntity
         return id == other.id
     }
 

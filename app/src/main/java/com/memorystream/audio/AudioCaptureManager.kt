@@ -29,6 +29,8 @@ class AudioCaptureManager(private val audioManager: AudioManager) {
     var isCapturing = false
         private set
 
+    var onAudioBuffer: ((ShortArray, Int) -> Unit)? = null
+
     fun findUsbMicrophone(): AudioDeviceInfo? {
         return audioManager.getDevices(AudioManager.GET_DEVICES_INPUTS).firstOrNull { device ->
             device.type == AudioDeviceInfo.TYPE_USB_DEVICE ||
@@ -81,6 +83,7 @@ class AudioCaptureManager(private val audioManager: AudioManager) {
             val readCount = audioRecord?.read(buffer, 0, buffer.size) ?: -1
             if (readCount > 0) {
                 onBuffer(buffer, readCount)
+                onAudioBuffer?.invoke(buffer, readCount)
             } else if (readCount < 0) {
                 Log.e(TAG, "AudioRecord read error: $readCount")
                 break

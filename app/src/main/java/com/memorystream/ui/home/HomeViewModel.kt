@@ -21,7 +21,8 @@ data class HomeUiState(
     val isRecording: Boolean = false,
     val hasUsbMic: Boolean = false,
     val chunkCount: Int = 0,
-    val totalDurationMs: Long = 0
+    val totalDurationMs: Long = 0,
+    val liveTranscript: String = ""
 )
 
 @HiltViewModel
@@ -45,9 +46,7 @@ class HomeViewModel @Inject constructor(
         }
         viewModelScope.launch {
             repository.getTotalDurationMs().collect { duration ->
-                _uiState.value = _uiState.value.copy(
-                    totalDurationMs = duration ?: 0
-                )
+                _uiState.value = _uiState.value.copy(totalDurationMs = duration ?: 0)
             }
         }
         checkUsbMic()
@@ -59,8 +58,25 @@ class HomeViewModel @Inject constructor(
 
         if (newRecording) {
             RecordingService.startRecording(application)
+            startCollectingLiveTranscript()
         } else {
             RecordingService.stopRecording(application)
+            _uiState.value = _uiState.value.copy(liveTranscript = "")
+        }
+    }
+
+    private fun startCollectingLiveTranscript() {
+        viewModelScope.launch {
+            // Poll the live transcript from the service
+            while (_uiState.value.isRecording) {
+                val flow = RecordingService.liveTranscript
+                if (flow != null) {
+                    flow.collect { transcript ->
+                        _uiState.value = _uiState.value.copy(liveTranscript = transcript)
+                    }
+                }
+                kotlinx.coroutines.delay(500)
+            }
         }
     }
 
