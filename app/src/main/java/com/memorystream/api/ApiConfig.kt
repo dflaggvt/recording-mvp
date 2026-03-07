@@ -3,13 +3,9 @@ package com.memorystream.api
 import com.memorystream.BuildConfig
 
 object ApiConfig {
-    val deepgramApiKey: String get() = BuildConfig.DEEPGRAM_API_KEY
-    val openaiApiKey: String get() = BuildConfig.OPENAI_API_KEY
+    val cloudRunUrl: String get() = BuildConfig.CLOUD_RUN_URL
 
-    fun isConfigured(): Boolean {
-        return deepgramApiKey.isNotBlank() &&
-            !deepgramApiKey.contains("YOUR_") &&
-            openaiApiKey.isNotBlank() &&
-            !openaiApiKey.contains("YOUR_")
+    fun isCloudConfigured(): Boolean {
+        return cloudRunUrl.isNotBlank() && !cloudRunUrl.contains("YOUR_")
     }
 }

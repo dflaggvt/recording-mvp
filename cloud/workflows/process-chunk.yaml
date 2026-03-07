@@ -1,0 +1,84 @@
+main:
+  params: [args]
+  steps:
+    - init:
+        assign:
+          - chunk_id: ${args.chunk_id}
+          - base_url: ${sys.get_env("CLOUD_RUN_URL")}
+
+    - transcribe:
+        call: http.post
+        args:
+          url: ${base_url + "/process/transcribe"}
+          body:
+            chunk_id: ${chunk_id}
+          timeout: 120
+        result: transcribe_result
+
+    - check_transcript:
+        switch:
+          - condition: ${transcribe_result.body.transcript_length == 0}
+            next: finish
+
+    - parallel_process:
+        parallel:
+          shared: [chunk_id, base_url]
+          branches:
+            - embed_chunk:
+                steps:
+                  - do_embed:
+                      call: http.post
+                      args:
+                        url: ${base_url + "/process/embed-chunk"}
+                        body:
+                          chunk_id: ${chunk_id}
+                        timeout: 30
+
+            - claims_pipeline:
+                steps:
+                  - extract_claims:
+                      call: http.post
+                      args:
+                        url: ${base_url + "/process/extract-claims"}
+                        body:
+                          chunk_id: ${chunk_id}
+                        timeout: 60
+                      result: claims_result
+                  - check_consistency:
+                      call: http.post
+                      args:
+                        url: ${base_url + "/process/check-consistency"}
+                        body:
+                          chunk_id: ${chunk_id}
+                        timeout: 60
+
+            - commitments:
+                steps:
+                  - detect_commitments:
+                      call: http.post
+                      args:
+                        url: ${base_url + "/process/detect-commitments"}
+                        body:
+                          chunk_id: ${chunk_id}
+                        timeout: 30
+
+    - embed_utterances:
+        call: http.post
+        args:
+          url: ${base_url + "/process/embed-utterances"}
+          body:
+            chunk_id: ${chunk_id}
+          timeout: 60
+
+    - proactive_analysis:
+        call: http.post
+        args:
+          url: ${base_url + "/process/proactive"}
+          body:
+            chunk_id: ${chunk_id}
+          timeout: 60
+
+    - finish:
+        return:
+          chunk_id: ${chunk_id}
+          status: "complete"

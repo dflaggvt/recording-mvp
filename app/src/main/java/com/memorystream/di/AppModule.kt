@@ -1,19 +1,18 @@
 package com.memorystream.di
 
 import android.content.Context
-import com.memorystream.api.ApiConfig
-import com.memorystream.data.db.AppDatabase
-import com.memorystream.data.db.MemoryChunkDao
-import com.memorystream.data.db.UtteranceDao
-import com.memorystream.data.repository.MemoryRepository
-import com.memorystream.embedding.OpenAIEmbeddingEngine
-import com.memorystream.embedding.SemanticSearchEngine
-import com.memorystream.intelligence.CommitmentDetector
+import com.memorystream.audio.AudioPlaybackManager
+import com.memorystream.service.LocationProvider
+import com.memorystream.service.ExclusionZoneManager
+import com.memorystream.service.PlaceResolver
+import com.memorystream.api.CloudApi
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
 import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
+import okhttp3.OkHttpClient
+import java.util.concurrent.TimeUnit
 import javax.inject.Singleton
 
 @Module
@@ -22,50 +21,41 @@ object AppModule {
 
     @Provides
     @Singleton
-    fun provideDatabase(@ApplicationContext context: Context): AppDatabase {
-        return AppDatabase.create(context)
+    fun provideOkHttpClient(): OkHttpClient {
+        return OkHttpClient.Builder()
+            .connectTimeout(30, TimeUnit.SECONDS)
+            .readTimeout(60, TimeUnit.SECONDS)
+            .writeTimeout(120, TimeUnit.SECONDS)
+            .build()
     }
 
     @Provides
     @Singleton
-    fun provideMemoryChunkDao(database: AppDatabase): MemoryChunkDao {
-        return database.memoryChunkDao()
+    fun provideAudioPlaybackManager(): AudioPlaybackManager {
+        return AudioPlaybackManager()
     }
 
     @Provides
     @Singleton
-    fun provideUtteranceDao(database: AppDatabase): UtteranceDao {
-        return database.utteranceDao()
+    fun provideCloudApi(client: OkHttpClient): CloudApi {
+        return CloudApi(client)
     }
 
     @Provides
     @Singleton
-    fun provideMemoryRepository(chunkDao: MemoryChunkDao, utteranceDao: UtteranceDao): MemoryRepository {
-        return MemoryRepository(chunkDao, utteranceDao)
+    fun provideLocationProvider(@ApplicationContext context: Context): LocationProvider {
+        return LocationProvider(context)
     }
 
     @Provides
     @Singleton
-    fun provideEmbeddingEngine(): OpenAIEmbeddingEngine {
-        return OpenAIEmbeddingEngine().also {
-            it.initialize(ApiConfig.openaiApiKey)
-        }
+    fun providePlaceResolver(): PlaceResolver {
+        return PlaceResolver()
     }
 
     @Provides
     @Singleton
-    fun provideCommitmentDetector(): CommitmentDetector {
-        return CommitmentDetector().also {
-            it.initialize(ApiConfig.openaiApiKey)
-        }
-    }
-
-    @Provides
-    @Singleton
-    fun provideSemanticSearchEngine(
-        embeddingEngine: OpenAIEmbeddingEngine,
-        repository: MemoryRepository
-    ): SemanticSearchEngine {
-        return SemanticSearchEngine(embeddingEngine, repository)
+    fun provideExclusionZoneManager(@ApplicationContext context: Context): ExclusionZoneManager {
+        return ExclusionZoneManager(context)
     }
 }

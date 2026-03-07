@@ -22,9 +22,7 @@ android {
         targetSdk = 34
         versionCode = 2
         versionName = "0.2.0"
-
-        buildConfigField("String", "DEEPGRAM_API_KEY", "\"${localProperties["deepgram.api.key"]}\"")
-        buildConfigField("String", "OPENAI_API_KEY", "\"${localProperties["openai.api.key"]}\"")
+        buildConfigField("String", "CLOUD_RUN_URL", "\"${localProperties["cloud.run.url"] ?: ""}\"")
     }
 
     buildFeatures {
@@ -57,7 +55,7 @@ android {
 }
 
 dependencies {
-    val composeBom = platform("androidx.compose:compose-bom:2024.01.00")
+    val composeBom = platform("androidx.compose:compose-bom:2024.06.00")
     implementation(composeBom)
 
     implementation("androidx.core:core-ktx:1.12.0")
@@ -71,12 +69,8 @@ dependencies {
     implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.material:material-icons-extended")
+    implementation("androidx.compose.ui:ui-text-google-fonts")
     implementation("androidx.navigation:navigation-compose:2.7.6")
-
-    // Room
-    implementation("androidx.room:room-runtime:2.6.1")
-    implementation("androidx.room:room-ktx:2.6.1")
-    ksp("androidx.room:room-compiler:2.6.1")
 
     // Hilt
     implementation("com.google.dagger:hilt-android:2.50")
@@ -92,6 +86,9 @@ dependencies {
 
     // Media playback
     implementation("androidx.media:media:1.7.0")
+
+    // Location
+    implementation("com.google.android.gms:play-services-location:21.1.0")
 
     debugImplementation("androidx.compose.ui:ui-tooling")
     debugImplementation("androidx.compose.ui:ui-test-manifest")

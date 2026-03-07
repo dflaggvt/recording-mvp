@@ -11,18 +11,11 @@ import android.os.PowerManager
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import com.memorystream.MemoryStreamApp
-import com.memorystream.R
-import com.memorystream.api.ApiConfig
+import android.app.NotificationManager
 import com.memorystream.audio.AudioCaptureManager
 import com.memorystream.audio.AudioChunkScheduler
-import com.memorystream.data.db.UtteranceEntity
+import com.memorystream.audio.ZoneCheckResult
 import com.memorystream.data.model.ChunkResult
-import com.memorystream.data.model.ChunkStatus
-import com.memorystream.data.repository.MemoryRepository
-import com.memorystream.embedding.OpenAIEmbeddingEngine
-import com.memorystream.intelligence.CommitmentDetector
-import com.memorystream.transcription.DeepgramClient
-import com.memorystream.transcription.TranscriptionWorker
 import com.memorystream.ui.MainActivity
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.CoroutineScope
@@ -30,9 +23,11 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withTimeoutOrNull
+import java.io.File
 import javax.inject.Inject
 
 @AndroidEntryPoint
@@ -43,9 +38,15 @@ class RecordingService : Service() {
         const val ACTION_START = "com.memorystream.action.START"
         const val ACTION_STOP = "com.memorystream.action.STOP"
         private const val NOTIFICATION_ID = 1
+        private const val WAKELOCK_TIMEOUT_MS = 8 * 60 * 60 * 1000L
 
-        var liveTranscript: StateFlow<String>? = null
-            private set
+        private const val ZONE_PAUSE_NOTIFICATION_ID = 2
+
+        private val _isRecording = MutableStateFlow(false)
+        val isRecording: StateFlow<Boolean> = _isRecording.asStateFlow()
+
+        private val _isPausedForZone = MutableStateFlow<String?>(null)
+        val isPausedForZone: StateFlow<String?> = _isPausedForZone.asStateFlow()
 
         fun startRecording(context: Context) {
             val intent = Intent(context, RecordingService::class.java).apply {
@@ -62,17 +63,17 @@ class RecordingService : Service() {
         }
     }
 
-    @Inject lateinit var repository: MemoryRepository
-    @Inject lateinit var embeddingEngine: OpenAIEmbeddingEngine
-    @Inject lateinit var commitmentDetector: CommitmentDetector
+    @Inject lateinit var locationProvider: LocationProvider
+    @Inject lateinit var placeResolver: PlaceResolver
+    @Inject lateinit var cloudChunkUploader: CloudChunkUploader
+    @Inject lateinit var exclusionZoneManager: ExclusionZoneManager
 
-    private val recordingScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
-    private val processingScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private val serviceJob = SupervisorJob()
+    private val recordingScope = CoroutineScope(serviceJob + Dispatchers.Default)
+    private val processingScope = CoroutineScope(serviceJob + Dispatchers.Default)
     private var audioCaptureManager: AudioCaptureManager? = null
     private var chunkScheduler: AudioChunkScheduler? = null
-    private var deepgramClient: DeepgramClient? = null
     private var wakeLock: PowerManager.WakeLock? = null
-    private var transcriptionWorker: TranscriptionWorker? = null
     private var processingJob: Job? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -81,15 +82,33 @@ class RecordingService : Service() {
         when (intent?.action) {
             ACTION_START -> startRecording()
             ACTION_STOP -> stopRecording()
+            else -> {
+                Log.w(TAG, "Received null or unknown action, stopping self")
+                stopSelf()
+            }
         }
-        return START_STICKY
+        return START_NOT_STICKY
     }
 
     private fun startRecording() {
-        Log.i(TAG, "Starting recording service")
+        if (chunkScheduler?.isRunning == true) {
+            Log.w(TAG, "Recording already in progress, ignoring duplicate start")
+            return
+        }
+
+        Log.i(TAG, "Starting recording service (cloud-only mode)")
 
         startForeground(NOTIFICATION_ID, buildNotification())
         acquireWakeLock()
+
+        val outputDir = getExternalFilesDir("audio_chunks") ?: run {
+            Log.e(TAG, "External storage unavailable")
+            stopSelf()
+            return
+        }
+
+        // Retry any orphaned audio files from previous crashes
+        retryOrphanedFiles(outputDir)
 
         val audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
         val capture = AudioCaptureManager(audioManager)
@@ -101,102 +120,99 @@ class RecordingService : Service() {
         }
 
         audioCaptureManager = capture
+        _isRecording.value = true
 
-        // Start Deepgram streaming
-        val dgClient = DeepgramClient(ApiConfig.deepgramApiKey)
-        deepgramClient = dgClient
-        dgClient.connect()
-        liveTranscript = dgClient.liveTranscript
-
-        // Embed each final utterance in real-time (~2s from speech to searchable)
-        dgClient.onFinalUtterance = { text, timestamp ->
-            processingScope.launch {
-                embedUtterance(text, timestamp)
-            }
-        }
-
-        // Hook audio into both chunk recorder AND Deepgram
-        capture.onAudioBuffer = { buffer, count ->
-            dgClient.sendAudio(buffer, count)
-        }
+        capture.onAudioBuffer = { _, _ -> }
         capture.start()
 
-        val outputDir = getExternalFilesDir("audio_chunks")!!
-        val scheduler = AudioChunkScheduler(capture, repository, outputDir)
+        val scheduler = AudioChunkScheduler(
+            capture, outputDir,
+            locationCallback = {
+                val loc = locationProvider.getCurrentLocation()
+                val place = placeResolver.resolve(loc)
+                Triple(loc?.latitude, loc?.longitude, place)
+            },
+            zoneCheck = { lat, lng ->
+                val zone = exclusionZoneManager.isInsideAnyZone(lat, lng)
+                zone?.let { ZoneCheckResult(it.label) }
+            }
+        )
+        scheduler.onZonePause = { zoneName ->
+            if (zoneName != null) {
+                _isPausedForZone.value = zoneName
+                showZonePauseNotification(zoneName)
+            } else if (_isPausedForZone.value != null) {
+                _isPausedForZone.value = null
+                dismissZonePauseNotification()
+            }
+        }
         chunkScheduler = scheduler
-
-        transcriptionWorker = TranscriptionWorker(repository, embeddingEngine, commitmentDetector)
 
         processingJob = processingScope.launch {
             for (chunkResult in scheduler.processingChannel) {
-                processChunk(chunkResult)
+                processChunkCloud(chunkResult)
             }
         }
 
         scheduler.start(recordingScope)
     }
 
-    private suspend fun embedUtterance(text: String, timestamp: Long) {
-        if (text.isBlank()) return
-        val id = java.util.UUID.randomUUID().toString()
-        try {
-            val utterance = UtteranceEntity(
-                id = id,
-                timestamp = timestamp,
-                text = text
-            )
-            repository.insertUtterance(utterance)
+    private fun retryOrphanedFiles(outputDir: File) {
+        processingScope.launch {
+            val orphans = outputDir.listFiles { f -> f.extension == "m4a" } ?: return@launch
+            if (orphans.isEmpty()) return@launch
 
-            val embedding = embeddingEngine.embed(text)
-            repository.updateUtterance(utterance.copy(
-                embeddingVector = embedding,
-                isEmbedded = true
-            ))
-            Log.d(TAG, "Utterance embedded: ${text.take(50)}...")
-        } catch (e: Exception) {
-            Log.w(TAG, "Failed to embed utterance: ${text.take(50)}", e)
-        }
-    }
-
-    private suspend fun processChunk(chunkResult: ChunkResult) {
-        try {
-            // Get the transcript that Deepgram accumulated during this chunk
-            val transcript = deepgramClient?.getAndClearFinalTranscript() ?: ""
-            Log.i(TAG, "Processing chunk with Deepgram transcript (${transcript.length} chars)")
-
-            // Find the chunk entity by file path
-            val chunks = repository.getChunksByStatus(ChunkStatus.PENDING_TRANSCRIPTION)
-            val chunk = chunks.firstOrNull { it.audioFilePath == chunkResult.filePath }
-
-            if (chunk != null) {
-                transcriptionWorker?.processChunk(chunk.id, transcript)
-            } else {
-                Log.w(TAG, "No pending chunk found for ${chunkResult.filePath}")
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to process chunk: ${chunkResult.filePath}", e)
-            val chunks = repository.getChunksByStatus(ChunkStatus.PENDING_TRANSCRIPTION)
-            chunks.forEach { chunk ->
-                if (chunk.audioFilePath == chunkResult.filePath) {
-                    repository.update(chunk.copy(status = ChunkStatus.ERROR))
+            Log.i(TAG, "Found ${orphans.size} orphaned audio files, retrying upload")
+            for (file in orphans) {
+                try {
+                    val chunkResult = ChunkResult(
+                        filePath = file.absolutePath,
+                        startTimestamp = file.lastModified(),
+                        endTimestamp = file.lastModified() + 300_000
+                    )
+                    processChunkCloud(chunkResult)
+                } catch (e: Exception) {
+                    Log.e(TAG, "Failed to retry orphan ${file.name}", e)
                 }
             }
         }
     }
 
+    private suspend fun processChunkCloud(chunkResult: ChunkResult) {
+        try {
+            Log.i(TAG, "Uploading chunk: ${chunkResult.filePath}")
+            val success = cloudChunkUploader.uploadAndProcess(
+                chunkResult = chunkResult,
+                latitude = chunkResult.latitude,
+                longitude = chunkResult.longitude,
+                placeName = chunkResult.placeName
+            )
+            if (success) {
+                Log.i(TAG, "Cloud chunk uploaded: ${chunkResult.filePath}")
+            } else {
+                Log.e(TAG, "Cloud upload failed: ${chunkResult.filePath}")
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Cloud processing failed: ${chunkResult.filePath}", e)
+        }
+    }
+
     private fun stopRecording() {
         Log.i(TAG, "Stopping recording service")
+
         chunkScheduler?.stop()
-        audioCaptureManager?.release()
-        recordingScope.cancel()
-
         chunkScheduler?.processingChannel?.close()
+        audioCaptureManager?.release()
 
-        processingScope.launch {
+        CoroutineScope(Dispatchers.Default).launch {
             Log.i(TAG, "Waiting for in-flight processing to complete...")
-            processingJob?.join()
-            deepgramClient?.disconnect()
-            liveTranscript = null
+            try {
+                processingJob?.join()
+            } catch (_: Exception) {}
+
+            _isRecording.value = false
+            _isPausedForZone.value = null
+            dismissZonePauseNotification()
             Log.i(TAG, "Processing complete, shutting down service")
             releaseWakeLock()
             stopForeground(STOP_FOREGROUND_REMOVE)
@@ -212,23 +228,47 @@ class RecordingService : Service() {
         )
 
         return NotificationCompat.Builder(this, MemoryStreamApp.RECORDING_CHANNEL_ID)
-            .setContentTitle(getString(R.string.recording_notification_title))
-            .setContentText(getString(R.string.recording_notification_text))
+            .setContentTitle("Listening...")
+            .setContentText("MemoryStream is active")
             .setSmallIcon(android.R.drawable.ic_btn_speak_now)
             .setContentIntent(pendingIntent)
             .setOngoing(true)
             .build()
     }
 
+    private fun showZonePauseNotification(zoneName: String) {
+        val pendingIntent = PendingIntent.getActivity(
+            this, 0,
+            Intent(this, MainActivity::class.java),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        val notification = NotificationCompat.Builder(this, MemoryStreamApp.RECORDING_CHANNEL_ID)
+            .setContentTitle("Recording paused")
+            .setContentText("Privacy zone: $zoneName")
+            .setSmallIcon(android.R.drawable.ic_dialog_alert)
+            .setContentIntent(pendingIntent)
+            .setOngoing(true)
+            .build()
+
+        val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        nm.notify(ZONE_PAUSE_NOTIFICATION_ID, notification)
+    }
+
+    private fun dismissZonePauseNotification() {
+        val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        nm.cancel(ZONE_PAUSE_NOTIFICATION_ID)
+    }
+
+    @Suppress("DEPRECATION")
     private fun acquireWakeLock() {
         val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
         wakeLock = pm.newWakeLock(
             PowerManager.PARTIAL_WAKE_LOCK,
             "MemoryStream::RecordingWakeLock"
         ).apply {
-            acquire()
+            acquire(WAKELOCK_TIMEOUT_MS)
         }
-        Log.i(TAG, "Wake lock acquired")
+        Log.i(TAG, "Wake lock acquired (${WAKELOCK_TIMEOUT_MS / 3600000}h timeout)")
     }
 
     private fun releaseWakeLock() {
@@ -245,14 +285,10 @@ class RecordingService : Service() {
         super.onDestroy()
         chunkScheduler?.stop()
         audioCaptureManager?.release()
-        deepgramClient?.disconnect()
-        liveTranscript = null
+        _isRecording.value = false
+        _isPausedForZone.value = null
         releaseWakeLock()
-        recordingScope.cancel()
-        processingScope.launch {
-            withTimeoutOrNull(600_000) { processingJob?.join() }
-            processingScope.cancel()
-        }
+        serviceJob.cancel()
         Log.i(TAG, "Recording service destroyed")
     }
 }

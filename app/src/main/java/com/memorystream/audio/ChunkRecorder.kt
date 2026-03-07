@@ -8,6 +8,7 @@ import android.util.Log
 import com.memorystream.data.model.ChunkResult
 import java.io.File
 import java.nio.ByteBuffer
+import java.util.concurrent.atomic.AtomicBoolean
 
 class ChunkRecorder(
     private val outputDir: File,
@@ -15,7 +16,7 @@ class ChunkRecorder(
 ) {
     companion object {
         private const val TAG = "ChunkRecorder"
-        private const val AAC_BIT_RATE = 64000
+        private const val AAC_BIT_RATE = 192000
         private const val AAC_PROFILE = MediaCodecInfo.CodecProfileLevel.AACObjectLC
     }
 
@@ -27,6 +28,7 @@ class ChunkRecorder(
     private var outputFile: File? = null
     private var totalBytesWritten = 0L
     private val bufferInfo = MediaCodec.BufferInfo()
+    private val finished = AtomicBoolean(false)
 
     fun start(): String {
         startTimestamp = System.currentTimeMillis()
@@ -89,6 +91,15 @@ class ChunkRecorder(
     }
 
     fun finish(): ChunkResult {
+        if (!finished.compareAndSet(false, true)) {
+            Log.w(TAG, "finish() called more than once, returning cached result")
+            return ChunkResult(
+                filePath = outputFile?.absolutePath ?: "",
+                startTimestamp = startTimestamp,
+                endTimestamp = System.currentTimeMillis()
+            )
+        }
+
         val enc = encoder
         if (enc != null) {
             val inputIndex = enc.dequeueInputBuffer(10_000)

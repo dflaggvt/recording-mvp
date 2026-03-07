@@ -10,15 +10,18 @@ class MemoryStreamApp : Application() {
 
     companion object {
         const val RECORDING_CHANNEL_ID = "recording_channel"
+        const val INSIGHTS_CHANNEL_ID = "insights_channel"
     }
 
     override fun onCreate() {
         super.onCreate()
-        createNotificationChannel()
+        createNotificationChannels()
     }
 
-    private fun createNotificationChannel() {
-        val channel = NotificationChannel(
+    private fun createNotificationChannels() {
+        val manager = getSystemService(NotificationManager::class.java)
+
+        val recordingChannel = NotificationChannel(
             RECORDING_CHANNEL_ID,
             getString(R.string.recording_notification_channel),
             NotificationManager.IMPORTANCE_LOW
@@ -26,8 +29,16 @@ class MemoryStreamApp : Application() {
             description = "Ongoing recording notification"
             setShowBadge(false)
         }
+        manager.createNotificationChannel(recordingChannel)
 
-        val manager = getSystemService(NotificationManager::class.java)
-        manager.createNotificationChannel(channel)
+        val insightsChannel = NotificationChannel(
+            INSIGHTS_CHANNEL_ID,
+            "Memory Insights",
+            NotificationManager.IMPORTANCE_DEFAULT
+        ).apply {
+            description = "Proactive memory insights and reminders"
+            enableVibration(true)
+        }
+        manager.createNotificationChannel(insightsChannel)
     }
 }

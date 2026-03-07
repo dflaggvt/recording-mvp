@@ -6,6 +6,9 @@ import android.media.AudioFormat
 import android.media.AudioManager
 import android.media.AudioRecord
 import android.media.MediaRecorder
+import android.media.audiofx.AcousticEchoCanceler
+import android.media.audiofx.AutomaticGainControl
+import android.media.audiofx.NoiseSuppressor
 import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.isActive
@@ -15,7 +18,7 @@ class AudioCaptureManager(private val audioManager: AudioManager) {
 
     companion object {
         private const val TAG = "AudioCaptureManager"
-        const val SAMPLE_RATE = 16000
+        const val SAMPLE_RATE = 44100
         const val CHANNEL_CONFIG = AudioFormat.CHANNEL_IN_MONO
         const val AUDIO_FORMAT = AudioFormat.ENCODING_PCM_16BIT
 
@@ -25,7 +28,13 @@ class AudioCaptureManager(private val audioManager: AudioManager) {
         )
     }
 
+    @Volatile
     private var audioRecord: AudioRecord? = null
+    private var noiseSuppressor: NoiseSuppressor? = null
+    private var gainControl: AutomaticGainControl? = null
+    private var echoCanceler: AcousticEchoCanceler? = null
+
+    @Volatile
     var isCapturing = false
         private set
 
@@ -41,28 +50,37 @@ class AudioCaptureManager(private val audioManager: AudioManager) {
     @SuppressLint("MissingPermission")
     fun initialize(): Boolean {
         try {
-            audioRecord = AudioRecord(
-                MediaRecorder.AudioSource.MIC,
+            releaseAudioEffects()
+            val oldRecord = audioRecord
+            audioRecord = null
+            try { oldRecord?.stop() } catch (_: Exception) {}
+            try { oldRecord?.release() } catch (_: Exception) {}
+
+            val newRecord = AudioRecord(
+                MediaRecorder.AudioSource.VOICE_RECOGNITION,
                 SAMPLE_RATE,
                 CHANNEL_CONFIG,
                 AUDIO_FORMAT,
                 BUFFER_SIZE * 2
             )
 
-            if (audioRecord?.state != AudioRecord.STATE_INITIALIZED) {
+            if (newRecord.state != AudioRecord.STATE_INITIALIZED) {
                 Log.e(TAG, "AudioRecord failed to initialize")
-                audioRecord?.release()
-                audioRecord = null
+                newRecord.release()
                 return false
             }
 
+            audioRecord = newRecord
+
             val usbMic = findUsbMicrophone()
             if (usbMic != null) {
-                audioRecord?.preferredDevice = usbMic
+                newRecord.preferredDevice = usbMic
                 Log.i(TAG, "Set preferred device to USB mic: ${usbMic.productName}")
             } else {
                 Log.w(TAG, "No USB microphone found, using default input")
             }
+
+            attachAudioEffects()
 
             return true
         } catch (e: Exception) {
@@ -71,10 +89,45 @@ class AudioCaptureManager(private val audioManager: AudioManager) {
         }
     }
 
+    private fun attachAudioEffects() {
+        val sessionId = audioRecord?.audioSessionId ?: return
+
+        // NoiseSuppressor intentionally disabled — it removes spectral detail
+        // that differentiates speakers, hurting diarization accuracy.
+        Log.i(TAG, "NoiseSuppressor disabled for better diarization quality")
+
+        if (AutomaticGainControl.isAvailable()) {
+            gainControl = AutomaticGainControl.create(sessionId)?.also {
+                it.enabled = true
+                Log.i(TAG, "AutomaticGainControl attached and enabled")
+            }
+        } else {
+            Log.w(TAG, "AutomaticGainControl not available on this device")
+        }
+
+        if (AcousticEchoCanceler.isAvailable()) {
+            echoCanceler = AcousticEchoCanceler.create(sessionId)?.also {
+                it.enabled = true
+                Log.i(TAG, "AcousticEchoCanceler attached and enabled")
+            }
+        } else {
+            Log.w(TAG, "AcousticEchoCanceler not available on this device")
+        }
+    }
+
+    private fun releaseAudioEffects() {
+        noiseSuppressor?.release()
+        noiseSuppressor = null
+        gainControl?.release()
+        gainControl = null
+        echoCanceler?.release()
+        echoCanceler = null
+    }
+
     fun start() {
         audioRecord?.startRecording()
         isCapturing = true
-        Log.i(TAG, "Audio capture started")
+        Log.i(TAG, "Audio capture started (VOICE_RECOGNITION + AudioEffects)")
     }
 
     suspend fun readLoop(onBuffer: (ShortArray, Int) -> Unit) = withContext(Dispatchers.IO) {
@@ -102,6 +155,7 @@ class AudioCaptureManager(private val audioManager: AudioManager) {
 
     fun release() {
         stop()
+        releaseAudioEffects()
         audioRecord?.release()
         audioRecord = null
         Log.i(TAG, "Audio capture released")
