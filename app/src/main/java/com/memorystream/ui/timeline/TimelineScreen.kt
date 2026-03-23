@@ -293,9 +293,9 @@ private fun DayCardView(
             }
 
             Text(
-                text = summaryText,
+                text = if (day.chunkCount == 0) "No recordings" else summaryText,
                 style = MaterialTheme.typography.bodySmall,
-                color = Color.White.copy(alpha = 0.40f)
+                color = Color.White.copy(alpha = if (day.chunkCount == 0) 0.25f else 0.40f)
             )
         }
     }

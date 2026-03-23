@@ -9,6 +9,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import java.util.Calendar
 import javax.inject.Inject
 
 data class DayCard(
@@ -67,7 +68,7 @@ class TimelineViewModel @Inject constructor(
                 }
                 currentOffset = summaries.size
                 _uiState.value = _uiState.value.copy(
-                    days = dayCards,
+                    days = fillMissingDays(dayCards),
                     isLoading = false,
                     hasMore = summaries.size >= 14
                 )
@@ -97,7 +98,7 @@ class TimelineViewModel @Inject constructor(
                 }
                 currentOffset += summaries.size
                 _uiState.value = _uiState.value.copy(
-                    days = _uiState.value.days + newCards,
+                    days = fillMissingDays(_uiState.value.days + newCards),
                     isLoading = false,
                     hasMore = summaries.size >= 14
                 )
@@ -144,6 +145,48 @@ class TimelineViewModel @Inject constructor(
                 }
             } catch (_: Exception) { }
         }
+    }
+
+    /**
+     * Given a list of day cards (sorted descending by timestamp, i.e. newest first),
+     * fills in any missing calendar days between them with empty DayCard entries,
+     * and also fills from today down to the first card if needed.
+     */
+    private fun fillMissingDays(cards: List<DayCard>): List<DayCard> {
+        if (cards.isEmpty()) return cards
+
+        val cal = Calendar.getInstance()
+
+        fun startOfDay(millis: Long): Long {
+            cal.timeInMillis = millis
+            cal.set(Calendar.HOUR_OF_DAY, 0)
+            cal.set(Calendar.MINUTE, 0)
+            cal.set(Calendar.SECOND, 0)
+            cal.set(Calendar.MILLISECOND, 0)
+            return cal.timeInMillis
+        }
+
+        val oneDayMs = 24 * 60 * 60 * 1000L
+
+        // Build a map of existing days keyed by start-of-day
+        val existing = cards.associateBy { startOfDay(it.dayTimestamp) }
+
+        // Range: from the earliest card's day up to today
+        val todayStart = startOfDay(System.currentTimeMillis())
+        val earliestStart = startOfDay(cards.last().dayTimestamp)
+
+        val result = mutableListOf<DayCard>()
+        var cursor = todayStart
+        while (cursor >= earliestStart) {
+            val card = existing[cursor]
+            if (card != null) {
+                result.add(card)
+            } else {
+                result.add(DayCard(dayTimestamp = cursor, chunkCount = 0, totalDurationMs = 0, places = emptyList()))
+            }
+            cursor -= oneDayMs
+        }
+        return result
     }
 
     fun playChunk(chunk: CloudApi.ChunkSummary) {
