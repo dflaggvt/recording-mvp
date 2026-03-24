@@ -166,8 +166,6 @@ class TimelineViewModel @Inject constructor(
             return cal.timeInMillis
         }
 
-        val oneDayMs = 24 * 60 * 60 * 1000L
-
         // Build a map of existing days keyed by start-of-day
         val existing = cards.associateBy { startOfDay(it.dayTimestamp) }
 
@@ -176,15 +174,17 @@ class TimelineViewModel @Inject constructor(
         val earliestStart = startOfDay(cards.last().dayTimestamp)
 
         val result = mutableListOf<DayCard>()
-        var cursor = todayStart
-        while (cursor >= earliestStart) {
+        // Use Calendar to step back one day at a time (handles DST correctly)
+        cal.timeInMillis = todayStart
+        while (cal.timeInMillis >= earliestStart) {
+            val cursor = cal.timeInMillis
             val card = existing[cursor]
             if (card != null) {
                 result.add(card)
             } else {
                 result.add(DayCard(dayTimestamp = cursor, chunkCount = 0, totalDurationMs = 0, places = emptyList()))
             }
-            cursor -= oneDayMs
+            cal.add(Calendar.DAY_OF_YEAR, -1)
         }
         return result
     }
