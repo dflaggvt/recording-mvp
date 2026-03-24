@@ -163,7 +163,9 @@ class CloudApi @Inject constructor(
         val transcript: String?,
         val summary: String?,
         val status: String,
-        val place_name: String?
+        val place_name: String?,
+        val latitude: Double? = null,
+        val longitude: Double? = null
     )
 
     suspend fun listChunks(limit: Int = 30): List<ChunkSummary> = withContext(Dispatchers.IO) {

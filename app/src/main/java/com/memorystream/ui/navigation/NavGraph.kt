@@ -83,6 +83,7 @@ import com.memorystream.ui.player.MiniPlayer
 import com.memorystream.ui.profile.ProfileScreen
 import com.memorystream.ui.review.DayReviewScreen
 import com.memorystream.ui.search.SearchScreen
+import com.memorystream.ui.soundscape.SoundscapeMapScreen
 import com.memorystream.ui.settings.SettingsScreen
 import com.memorystream.ui.speakers.SpeakersScreen
 import com.memorystream.ui.theme.CalmColors
@@ -102,6 +103,9 @@ sealed class Screen(val route: String, val label: String, val icon: ImageVector,
     data object Settings : Screen("settings", "Settings", Icons.Filled.Search, Icons.Outlined.Search)
     data object Speakers : Screen("speakers", "People", Icons.Filled.Search, Icons.Outlined.Search)
     data object Debug : Screen("debug", "Debug", Icons.Filled.Search, Icons.Outlined.Search)
+    data object Soundscape : Screen("soundscape/{dayTimestamp}", "Soundscape", Icons.Filled.Search, Icons.Outlined.Search) {
+        fun createRoute(dayTimestamp: Long) = "soundscape/$dayTimestamp"
+    }
 }
 
 private const val PREFS_NAME = "memorystream_prefs"
@@ -163,7 +167,7 @@ fun MemoryStreamNavGraph(playbackManager: AudioPlaybackManager = hiltViewModel<N
                 currentRoute in listOf(
                     Screen.Onboarding.route, Screen.Settings.route, Screen.Speakers.route,
                     Screen.Debug.route, Screen.FullPlayer.route
-                ) || currentRoute.startsWith("day_review")
+                ) || currentRoute.startsWith("day_review") || currentRoute.startsWith("soundscape")
             )
             if (!hideBottomNav) {
                 Column(
@@ -246,6 +250,9 @@ fun MemoryStreamNavGraph(playbackManager: AudioPlaybackManager = hiltViewModel<N
                     TimelineScreen(
                         onNavigateToDayReview = { dayTimestamp ->
                             navController.navigate(Screen.DayReview.createRoute(dayTimestamp))
+                        },
+                        onNavigateToSoundscape = { dayTimestamp ->
+                            navController.navigate(Screen.Soundscape.createRoute(dayTimestamp))
                         }
                     )
                 }
@@ -297,6 +304,9 @@ fun MemoryStreamNavGraph(playbackManager: AudioPlaybackManager = hiltViewModel<N
                     val dayTimestamp = backStackEntry.arguments?.getLong("dayTimestamp") ?: System.currentTimeMillis()
                     DayReviewScreen(
                         onBack = { navController.popBackStack() },
+                        onNavigateToSoundscape = { ts ->
+                            navController.navigate(Screen.Soundscape.createRoute(ts))
+                        },
                         dayTimestamp = dayTimestamp
                     )
                 }
@@ -315,6 +325,19 @@ fun MemoryStreamNavGraph(playbackManager: AudioPlaybackManager = hiltViewModel<N
                     exitTransition = { slideOutHorizontally(tween(250)) { it / 3 } + fadeOut(tween(200)) }
                 ) {
                     SpeakersScreen(onBack = { navController.popBackStack() })
+                }
+
+                composable(
+                    Screen.Soundscape.route,
+                    arguments = listOf(navArgument("dayTimestamp") { type = NavType.LongType }),
+                    enterTransition = { slideInVertically(tween(300)) { it / 4 } + fadeIn(tween(300)) },
+                    exitTransition = { slideOutVertically(tween(250)) { it / 4 } + fadeOut(tween(200)) }
+                ) { backStackEntry ->
+                    val dayTimestamp = backStackEntry.arguments?.getLong("dayTimestamp") ?: System.currentTimeMillis()
+                    SoundscapeMapScreen(
+                        onBack = { navController.popBackStack() },
+                        dayTimestamp = dayTimestamp
+                    )
                 }
             }
         }

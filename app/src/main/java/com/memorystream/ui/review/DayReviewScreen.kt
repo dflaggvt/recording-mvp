@@ -30,6 +30,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Map
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.RadioButtonUnchecked
@@ -78,6 +79,7 @@ private val unknownPlaceColor = Color(0xFF6A6480)
 @Composable
 fun DayReviewScreen(
     onBack: () -> Unit = {},
+    onNavigateToSoundscape: (Long) -> Unit = {},
     dayTimestamp: Long = System.currentTimeMillis(),
     viewModel: DayReviewViewModel = hiltViewModel()
 ) {
@@ -132,7 +134,10 @@ fun DayReviewScreen(
             .fillMaxSize()
             .padding(horizontal = 24.dp, vertical = 16.dp)
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.fillMaxWidth()
+        ) {
             IconButton(onClick = onBack, modifier = Modifier.size(48.dp)) {
                 Icon(
                     Icons.AutoMirrored.Filled.ArrowBack,
@@ -143,8 +148,20 @@ fun DayReviewScreen(
             Text(
                 text = "Your day, remembered.",
                 style = MaterialTheme.typography.titleLarge,
-                color = Color.White.copy(alpha = 0.90f)
+                color = Color.White.copy(alpha = 0.90f),
+                modifier = Modifier.weight(1f)
             )
+            IconButton(
+                onClick = { onNavigateToSoundscape(dayTimestamp) },
+                modifier = Modifier.size(40.dp)
+            ) {
+                Icon(
+                    Icons.Default.Map,
+                    contentDescription = "Soundscape map",
+                    tint = CalmColors.Periwinkle.copy(alpha = 0.60f),
+                    modifier = Modifier.size(22.dp)
+                )
+            }
         }
 
         Spacer(modifier = Modifier.height(8.dp))

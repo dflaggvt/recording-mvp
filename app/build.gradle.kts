@@ -12,6 +12,8 @@ val localProperties = Properties().apply {
     if (file.exists()) load(file.inputStream())
 }
 
+val mapsApiKey: String = localProperties.getProperty("MAPS_API_KEY", "")
+
 android {
     namespace = "com.memorystream"
     compileSdk = 34
@@ -23,6 +25,7 @@ android {
         versionCode = 2
         versionName = "0.2.0"
         buildConfigField("String", "CLOUD_RUN_URL", "\"${localProperties["cloud.run.url"] ?: ""}\"")
+        manifestPlaceholders["MAPS_API_KEY"] = mapsApiKey
     }
 
     buildFeatures {
@@ -89,6 +92,10 @@ dependencies {
 
     // Location
     implementation("com.google.android.gms:play-services-location:21.1.0")
+
+    // Google Maps
+    implementation("com.google.maps.android:maps-compose:4.3.0")
+    implementation("com.google.android.gms:play-services-maps:18.2.0")
 
     debugImplementation("androidx.compose.ui:ui-tooling")
     debugImplementation("androidx.compose.ui:ui-test-manifest")

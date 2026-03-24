@@ -19,6 +19,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Map
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
@@ -60,7 +61,8 @@ private val unknownPlaceColor = Color(0xFF6A6480)
 @Composable
 fun TimelineScreen(
     viewModel: TimelineViewModel = hiltViewModel(),
-    onNavigateToDayReview: (Long) -> Unit = {}
+    onNavigateToDayReview: (Long) -> Unit = {},
+    onNavigateToSoundscape: (Long) -> Unit = {}
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val listState = rememberLazyListState()
@@ -80,12 +82,33 @@ fun TimelineScreen(
             .fillMaxSize()
             .padding(horizontal = 24.dp, vertical = 16.dp)
     ) {
-        Text(
-            text = "Your Timeline",
-            style = MaterialTheme.typography.headlineLarge,
-            color = Color.White.copy(alpha = 0.90f),
-            modifier = Modifier.padding(bottom = 20.dp)
-        )
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(bottom = 20.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "Your Timeline",
+                style = MaterialTheme.typography.headlineLarge,
+                color = Color.White.copy(alpha = 0.90f)
+            )
+            IconButton(
+                onClick = { onNavigateToSoundscape(System.currentTimeMillis()) },
+                modifier = Modifier
+                    .size(40.dp)
+                    .clip(CircleShape)
+                    .background(Color.White.copy(alpha = 0.08f))
+            ) {
+                Icon(
+                    Icons.Default.Map,
+                    contentDescription = "Soundscape map",
+                    tint = CalmColors.Periwinkle.copy(alpha = 0.70f),
+                    modifier = Modifier.size(22.dp)
+                )
+            }
+        }
 
         if (uiState.days.isEmpty() && !uiState.isLoading) {
             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -293,9 +316,9 @@ private fun DayCardView(
             }
 
             Text(
-                text = summaryText,
+                text = if (day.chunkCount == 0) "No recordings" else summaryText,
                 style = MaterialTheme.typography.bodySmall,
-                color = Color.White.copy(alpha = 0.40f)
+                color = Color.White.copy(alpha = if (day.chunkCount == 0) 0.25f else 0.40f)
             )
         }
     }
