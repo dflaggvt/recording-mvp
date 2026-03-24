@@ -110,7 +110,30 @@ fun TimelineScreen(
             }
         }
 
-        if (uiState.days.isEmpty() && !uiState.isLoading) {
+        if (uiState.error != null && uiState.days.isEmpty()) {
+            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(
+                        text = "Unable to load timeline",
+                        style = MaterialTheme.typography.titleMedium,
+                        color = Color.White.copy(alpha = 0.50f)
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = uiState.error ?: "",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Color.White.copy(alpha = 0.30f)
+                    )
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Text(
+                        text = "Tap to retry",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = CalmColors.Periwinkle.copy(alpha = 0.6f),
+                        modifier = Modifier.clickable { viewModel.refresh() }
+                    )
+                }
+            }
+        } else if (uiState.days.isEmpty() && !uiState.isLoading) {
             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     WaveformVisualization(

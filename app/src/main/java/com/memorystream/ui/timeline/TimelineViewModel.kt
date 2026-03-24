@@ -9,6 +9,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import android.util.Log
 import java.util.Calendar
 import javax.inject.Inject
 
@@ -30,7 +31,8 @@ data class TimelineUiState(
     val days: List<DayCard> = emptyList(),
     val discovery: DiscoveryMemory? = null,
     val isLoading: Boolean = false,
-    val hasMore: Boolean = true
+    val hasMore: Boolean = true,
+    val error: String? = null
 )
 
 @HiltViewModel
@@ -38,6 +40,10 @@ class TimelineViewModel @Inject constructor(
     private val cloudApi: CloudApi,
     private val playbackManager: AudioPlaybackManager
 ) : ViewModel() {
+
+    companion object {
+        private const val TAG = "TimelineViewModel"
+    }
 
     private val _uiState = MutableStateFlow(TimelineUiState())
     val uiState: StateFlow<TimelineUiState> = _uiState.asStateFlow()
@@ -51,9 +57,10 @@ class TimelineViewModel @Inject constructor(
 
     private fun loadInitialDays() {
         viewModelScope.launch {
-            _uiState.value = _uiState.value.copy(isLoading = true)
+            _uiState.value = _uiState.value.copy(isLoading = true, error = null)
             try {
                 val summaries = cloudApi.getDailySummaries(limit = 14, offset = 0)
+                Log.d(TAG, "Got ${summaries.size} daily summaries")
                 val dayCards = summaries.map { row ->
                     val dayStart = row.day_timestamp
                     val dayEnd = dayStart + 24 * 60 * 60 * 1000L - 1
@@ -73,7 +80,11 @@ class TimelineViewModel @Inject constructor(
                     hasMore = summaries.size >= 14
                 )
             } catch (e: Exception) {
-                _uiState.value = _uiState.value.copy(isLoading = false)
+                Log.e(TAG, "Failed to load timeline", e)
+                _uiState.value = _uiState.value.copy(
+                    isLoading = false,
+                    error = "Failed to load timeline: ${e.message}"
+                )
             }
         }
     }
@@ -103,7 +114,11 @@ class TimelineViewModel @Inject constructor(
                     hasMore = summaries.size >= 14
                 )
             } catch (e: Exception) {
-                _uiState.value = _uiState.value.copy(isLoading = false)
+                Log.e(TAG, "Failed to load more", e)
+                _uiState.value = _uiState.value.copy(
+                    isLoading = false,
+                    error = "Failed to load more: ${e.message}"
+                )
             }
         }
     }
@@ -148,22 +163,20 @@ class TimelineViewModel @Inject constructor(
     }
 
     /**
-     * Given a list of day cards (sorted descending by timestamp, i.e. newest first),
-     * fills in any missing calendar days between them with empty DayCard entries,
-     * and also fills from today down to the first card if needed.
+     * Given a list of day cards, fills in any missing calendar days between them
+     * with empty DayCard entries, and also fills from today down to the earliest card.
      */
     private fun fillMissingDays(cards: List<DayCard>): List<DayCard> {
         if (cards.isEmpty()) return cards
 
-        val cal = Calendar.getInstance()
-
         fun startOfDay(millis: Long): Long {
-            cal.timeInMillis = millis
-            cal.set(Calendar.HOUR_OF_DAY, 0)
-            cal.set(Calendar.MINUTE, 0)
-            cal.set(Calendar.SECOND, 0)
-            cal.set(Calendar.MILLISECOND, 0)
-            return cal.timeInMillis
+            val c = Calendar.getInstance()
+            c.timeInMillis = millis
+            c.set(Calendar.HOUR_OF_DAY, 0)
+            c.set(Calendar.MINUTE, 0)
+            c.set(Calendar.SECOND, 0)
+            c.set(Calendar.MILLISECOND, 0)
+            return c.timeInMillis
         }
 
         // Build a map of existing days keyed by start-of-day
@@ -171,12 +184,14 @@ class TimelineViewModel @Inject constructor(
 
         // Range: from the earliest card's day up to today
         val todayStart = startOfDay(System.currentTimeMillis())
-        val earliestStart = startOfDay(cards.last().dayTimestamp)
+        val earliestStart = cards.minOf { startOfDay(it.dayTimestamp) }
 
         val result = mutableListOf<DayCard>()
         // Use Calendar to step back one day at a time (handles DST correctly)
+        val cal = Calendar.getInstance()
         cal.timeInMillis = todayStart
-        while (cal.timeInMillis >= earliestStart) {
+        var safety = 0
+        while (cal.timeInMillis >= earliestStart && safety < 400) {
             val cursor = cal.timeInMillis
             val card = existing[cursor]
             if (card != null) {
@@ -185,6 +200,7 @@ class TimelineViewModel @Inject constructor(
                 result.add(DayCard(dayTimestamp = cursor, chunkCount = 0, totalDurationMs = 0, places = emptyList()))
             }
             cal.add(Calendar.DAY_OF_YEAR, -1)
+            safety++
         }
         return result
     }
