@@ -242,7 +242,7 @@ async def get_daily_summaries(
                SUM(end_timestamp - start_timestamp) AS total_duration_ms,
                STRING_AGG(DISTINCT place_name, ',') FILTER (WHERE place_name IS NOT NULL) AS places
            FROM memory_chunks
-           WHERE user_id = $1 AND status = 'EMBEDDED'
+           WHERE user_id = $1 AND status IN ('TRANSCRIBED', 'EMBEDDED')
            GROUP BY start_timestamp / 86400000
            ORDER BY day_timestamp DESC
            LIMIT $2 OFFSET $3""",
