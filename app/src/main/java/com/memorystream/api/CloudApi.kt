@@ -27,6 +27,20 @@ class CloudApi @Inject constructor(
 
     val baseUrl: String get() = ApiConfig.cloudRunUrl
 
+    /**
+     * Validates that the base URL is configured before making API calls.
+     * Throws [IllegalStateException] if the URL is blank or contains placeholder text.
+     */
+    private fun requireBaseUrl(): String {
+        val url = baseUrl
+        if (url.isBlank() || url.contains("YOUR_")) {
+            throw IllegalStateException(
+                "Cloud API URL is not configured. Set CLOUD_RUN_URL in local.properties or build config."
+            )
+        }
+        return url
+    }
+
     // ── Upload ──────────────────────────────────────────────────────────────
 
     data class UploadUrlResponse(val upload_url: String, val gcs_path: String)
@@ -169,8 +183,9 @@ class CloudApi @Inject constructor(
     )
 
     suspend fun listChunks(limit: Int = 30): List<ChunkSummary> = withContext(Dispatchers.IO) {
+        val url = requireBaseUrl()
         val request = Request.Builder()
-            .url("$baseUrl/api/chunks?limit=$limit")
+            .url("$url/api/chunks?limit=$limit")
             .get()
             .build()
 
@@ -216,8 +231,9 @@ class CloudApi @Inject constructor(
     )
 
     suspend fun getDailySummaries(limit: Int = 14, offset: Int = 0): List<DaySummaryResponse> = withContext(Dispatchers.IO) {
+        val url = requireBaseUrl()
         val request = Request.Builder()
-            .url("$baseUrl/api/daily-summaries?limit=$limit&offset=$offset")
+            .url("$url/api/daily-summaries?limit=$limit&offset=$offset")
             .get()
             .build()
 
