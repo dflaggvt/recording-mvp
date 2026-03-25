@@ -24,7 +24,7 @@ android {
         targetSdk = 34
         versionCode = 2
         versionName = "0.2.0"
-        buildConfigField("String", "CLOUD_RUN_URL", "\"${localProperties["cloud.run.url"] ?: ""}\"")
+        buildConfigField("String", "CLOUD_RUN_URL", "\"${localProperties["cloud.run.url"] ?: "https://memorystream-api-725938514929.us-east1.run.app"}\"")
         manifestPlaceholders["MAPS_API_KEY"] = mapsApiKey
     }
 

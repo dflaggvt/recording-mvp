@@ -2,6 +2,7 @@ package com.memorystream.ui.timeline
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.memorystream.api.ApiConfig
 import com.memorystream.api.CloudApi
 import dagger.hilt.android.lifecycle.HiltViewModel
 import com.memorystream.audio.AudioPlaybackManager
@@ -57,6 +58,13 @@ class TimelineViewModel @Inject constructor(
 
     private fun loadInitialDays() {
         viewModelScope.launch {
+            if (!ApiConfig.isCloudConfigured()) {
+                _uiState.value = _uiState.value.copy(
+                    isLoading = false,
+                    error = "Cloud API URL is not configured. Set CLOUD_RUN_URL in build config."
+                )
+                return@launch
+            }
             _uiState.value = _uiState.value.copy(isLoading = true, error = null)
             try {
                 val summaries = cloudApi.getDailySummaries(limit = 14, offset = 0)
